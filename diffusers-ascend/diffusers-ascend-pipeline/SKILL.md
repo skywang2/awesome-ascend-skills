@@ -1,6 +1,6 @@
 ---
 name: diffusers-ascend-pipeline
-description: Diffusers Pipeline 推理指南，用于华为昇腾 NPU。覆盖环境预检、通用 Pipeline 推理（图像/视频模型）、内存优化（CPU offload、attention slicing、VAE slicing）和 LoRA 加载与融合。当用户需要在昇腾 NPU 上运行 Diffusers 推理时使用。
+description: Diffusers Pipeline 推理指南，用于华为昇腾 NPU。覆盖环境预检、通用 Pipeline 推理（图像/视频模型）、内存优化（CPU offload、attention slicing、VAE slicing）、LoRA 加载与融合、多卡推理和按版本检索 Diffusers API。用户一旦提到在昇腾 NPU 上运行 FLUX、SDXL、Wan、CogVideoX 等 Diffusers 推理，或需要排查推理参数、显存优化、LoRA 接入、Pipeline API 路径时，就应使用此 skill。
 keywords:
     - diffusers
     - pipeline
@@ -19,6 +19,15 @@ keywords:
 # Diffusers 昇腾 NPU Pipeline 推理
 
 本 Skill 指导用户在华为昇腾 NPU 上运行 HuggingFace Diffusers Pipeline 推理，适用于任意 Diffusers 模型。
+
+## 使用顺序
+
+按下面顺序使用本 Skill：
+
+1. 先做预检，确认环境、NPU 和权重可用。
+2. 再执行图像或视频 Pipeline 推理。
+3. 需要时再启用内存优化、LoRA 或多卡推理。
+4. 查询 API 时，按版本先定位 GitHub API 路径，再打开官网文档。
 
 ## 前置要求
 
