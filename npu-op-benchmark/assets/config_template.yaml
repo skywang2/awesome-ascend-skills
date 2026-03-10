@@ -1,0 +1,4 @@
+op: repeat_interleave
+device: npu:0
+iters: 100
+warmup: 20
