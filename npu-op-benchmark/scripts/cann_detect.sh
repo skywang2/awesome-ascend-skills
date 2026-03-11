@@ -1,15 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
-TOOLKIT_PATH="${1:-/usr/local/Ascend/ascend-toolkit}"
-echo "toolkit_path=${TOOLKIT_PATH}"
-if [[ -f "${TOOLKIT_PATH}/set_env.sh" ]]; then
-  echo "set_env_exists=true"
+
+if [[ $# -gt 0 ]]; then
+  CANDIDATE_ROOTS=("$1")
 else
-  echo "set_env_exists=false"
+  CANDIDATE_ROOTS=(
+    "/usr/local/Ascend/ascend-toolkit"
+    "/usr/local/Ascend/cann"
+  )
 fi
-if [[ -e "${TOOLKIT_PATH}/latest" ]]; then
-  echo "latest_ll=$(ls -ld "${TOOLKIT_PATH}/latest")"
-else
-  echo "latest_ll=missing"
-fi
-find "${TOOLKIT_PATH}" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort | sed 's/^/version_dir=/' || true
+
+for root in "${CANDIDATE_ROOTS[@]}"; do
+  echo "cann_root=${root}"
+  if [[ -f "${root}/set_env.sh" ]]; then
+    echo "set_env_exists=true"
+  else
+    echo "set_env_exists=false"
+  fi
+
+  if [[ -e "${root}/latest" ]]; then
+    echo "latest_ll=$(ls -ld "${root}/latest")"
+    if [[ -L "${root}/latest/compiler" ]]; then
+      echo "compiler_ll=$(ls -ld "${root}/latest/compiler")"
+    else
+      echo "compiler_ll=missing_or_not_symlink"
+    fi
+  else
+    echo "latest_ll=missing"
+    echo "compiler_ll=missing"
+  fi
+
+  find "${root}" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort | sed 's/^/version_dir=/' || true
+  echo "===="
+done

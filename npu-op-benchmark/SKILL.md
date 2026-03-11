@@ -20,19 +20,22 @@ keywords:
 
 ## 执行策略
 
-1. 先检查现有环境。优先运行 `scripts/cann_detect.sh`，并结合 [cann](references/cann.md) 判断当前 CANN 布局；同时检查 `pip list | grep torch_npu`。
-2. 判断 CANN 版本时，先区分版本布局：
+1. 先要求使用者提供服务器 IP、账号、密码；如果缺少这些访问信息，直接中断，不猜测环境。
+2. 询问使用者是否有 CANN、torch 版本要求，以及是否指定 conda 环境名、容器名、CANN 目录。
+3. CANN 检查优先使用使用者提供的 CANN 目录；未提供时，再按 [cann](references/cann.md) 检索常见路径并判断当前版本布局：
    - `CANN < 8.5` 常见路径：`/usr/local/Ascend/ascend-toolkit/latest`
    - `CANN >= 8.5` 常见路径：`/usr/local/Ascend/cann/latest`
-3. 如果用户要求特定 CANN 版本，例如 `8.2` 或 `8.3`，优先查看对应 toolkit 目录下是否存在目标版本目录，再看 `latest` 实际指向；如果 `latest` 不是软链接，只能据目录结构和运行环境保守判断。
-4. Docker 场景优先运行 `scripts/find_docker_cann.sh`，并结合 [docker](references/docker.md) 选择满足要求的容器。
-5. 发现满足要求的容器后，只报告容器名，等待用户明确同意再执行 benchmark。
-6. 执行 benchmark 前，先询问使用者是“提供测试 demo”还是“由 AI 根据目标算子生成 demo”。如果使用者提供 demo，优先使用使用者的 demo。
-7. 真正执行 benchmark 时，优先复用容器原本已有的 `torch` 和 `torch_npu`，不要重复安装。
-8. 如果当前环境缺少目标 CANN、`torch_npu` 不可用、或算子执行报环境错误，立即停止，不修环境；直接要求使用者提供新的可用环境。
-9. 不自动安装 CANN，不自动修复容器，不启用任何回退安装流程。
-10. 如果测试过程中必须创建文件，都放到隔离测试目录，结束后删除。
-11. benchmark 结束后，直接返回完整结果信息，不额外生成报告文件。
+4. 如果使用者希望走服务器 conda 环境，必须提供 conda 环境名；处理规则见 [conda](references/conda.md)。
+5. 如果使用者未选择 conda，或 conda 方案不满足要求，再按 [docker](references/docker.md) 查找容器。优先使用用户提供的容器名；未提供时，只把候选容器信息返回给用户确认。
+6. 无论 conda 还是容器，都必须先把环境名、torch/torch_npu 版本、CANN 版本返回给使用者确认，再执行 benchmark。
+7. 执行 benchmark 前，先询问使用者是“提供测试 demo”还是“由 AI 根据目标算子生成 demo”。如果使用者提供 demo，优先使用使用者的 demo。
+8. 当前仓库里的 `assets/config_template.yaml`、`scripts/bench_repeat_interleave.py` 和 `scripts/bench_op.py` 中 `repeat_interleave` 相关内容只是示例，不代表这个 Skill 只支持测试 `repeat_interleave`。
+9. 如果使用者没有提供额外用例，agent 可以根据目标算子的性能测试原则自行设计 demo；设计完成后先返回给使用者。
+10. 真正执行 benchmark 时，优先复用目标环境原本已有的 `torch` 和 `torch_npu`，不要重复安装。
+11. 如果当前环境缺少目标 CANN、`torch_npu` 不可用、或算子执行报环境错误，立即停止，不修环境；直接要求使用者提供新的可用环境。
+12. 不自动安装 CANN，不自动修复 conda 或容器，不启用任何回退安装流程。
+13. 如果测试过程中必须创建文件，都放到隔离测试目录，结束后删除。
+14. benchmark 结束后，直接返回完整结果信息，不额外生成报告文件。
 
 ## 返回结果
 
@@ -42,7 +45,9 @@ keywords:
 - `torch 版本`
 - `torch_npu 版本`
 - `测试环境`
+- `环境名称（conda 名或容器名）`
 - `测试方法`
+- `目标算子`
 - `tensor shape`
 - `demo 代码`
 - `性能数据`
@@ -59,7 +64,7 @@ torch_npu 版本:
 <torch_npu_version 或 unknown>
 
 当前引用的 CANN 版本:
-<根据 /usr/local/Ascend/ascend-toolkit/latest 和同级目录判断出的版本，若无法确定则写 unknown，并附目录信息>
+<根据用户提供目录或常见路径判断出的版本；若无法确定则写 unknown，并附 `latest` 布局和候选目录信息>
 
 demo.py 内容:
 <实际执行的 demo 代码；优先使用使用者提供的 demo，否则使用 AI 生成的 demo>
@@ -76,7 +81,7 @@ input/output tensor shape:
 - CANN 检测：`scripts/cann_detect.sh`
 - Docker 容器检查：`scripts/find_docker_cann.sh`
 - 通用算子基准：`scripts/bench_op.py`
-- repeat_interleave 示例：`scripts/bench_repeat_interleave.py`
+- repeat_interleave 示例包装脚本：`scripts/bench_repeat_interleave.py`
 
 更多说明见：
 - [usage](references/usage.md)

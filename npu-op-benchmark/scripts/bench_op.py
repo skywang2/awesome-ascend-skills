@@ -4,8 +4,11 @@ from pathlib import Path
 
 def parse_args():
     """Parse command-line arguments for the benchmark runner."""
-    p = argparse.ArgumentParser(description='Generic single-operator benchmark for Ascend NPU or CPU.')
-    p.add_argument('--op', default='repeat_interleave')
+    p = argparse.ArgumentParser(
+        description='Single-operator benchmark runner for Ascend NPU or CPU. '
+                    'The bundled implementation currently includes repeat_interleave as an example.'
+    )
+    p.add_argument('--op', default='repeat_interleave', help='Operator name. The bundled example implementation currently supports repeat_interleave.')
     p.add_argument('--device', default='npu:0')
     p.add_argument('--dtype', default='float32')
     p.add_argument('--spatial_h', type=int, default=64)
