@@ -266,12 +266,33 @@ Default to `openai-chat` for text LLMs. The scripts (`generate_bench_cmd.py`, `a
 
 **Warmup:** `--num-warmups N`: warmup requests before measurement (default 0, recommend 3-10 for graph-mode)
 
-### SLO & Metrics (for auto-optimize or SLO-aware benchmarks)
+### Metrics Reporting
 
-- `--goodput "METRIC:VALUE_MS"`: SLO targets (e.g., `--goodput "ttft:500"`)
-  - Valid metrics: `ttft`, `tpot`, `e2el` (values in milliseconds)
 - `--percentile-metrics "ttft,tpot,itl,e2el"`: which metrics to report percentiles for
 - `--metric-percentiles "50,90,95,99"`: which percentiles to compute
+
+The result JSON includes for each metric: `mean`, `median`, `std`, and the requested percentiles (e.g., `p50`, `p90`, `p95`, `p99`). All values are in milliseconds.
+
+### Goodput (per-request SLO filtering)
+
+- `--goodput "ttft:500" "tpot:50"`: per-request SLO thresholds (values in ms)
+  - Valid metrics: `ttft`, `tpot`, `e2el`
+  - A request is counted as "good" only if ALL its individual metrics meet the thresholds
+  - The result includes `request_goodput` (good req/s) alongside `request_throughput` (total req/s)
+  - Useful for computing `goodput_ratio = request_goodput / request_throughput`
+
+### SLO Constraints (for auto-optimize)
+
+In auto-optimize mode, SLO constraints determine when a load level is acceptable. Supported SLO dimensions:
+
+| SLO Key Format | Example | Check | Description |
+|----------------|---------|-------|-------------|
+| `{mean\|median}_{ttft\|tpot\|itl\|e2el}` | `mean_ttft:300` | <= | Mean/median latency in ms |
+| `p{N}_{ttft\|tpot\|itl\|e2el}` | `p99_ttft:500` | <= | Percentile latency in ms |
+| `success_rate` | `success_rate:95` | >= | Completed / total requests (%) |
+| `goodput_ratio` | `goodput_ratio:0.9` | >= | Good requests / completed (0~1, requires `--goodput`) |
+
+Multiple SLOs can be combined — ALL must be satisfied for a load level to pass.
 
 ### Sampling Parameters (usually defaults are fine)
 - `--temperature`, `--top-p`, `--top-k`, etc.
@@ -291,7 +312,7 @@ Before executing, validate with `scripts/validate_params.py` or check manually:
 2. `random-rerank` → must use `vllm-rerank` backend
 3. `random-mm` / `custom_mm` → require `openai-chat`
 4. `sharegpt`/`custom`/`custom_mm` → require `--dataset-path`
-5. `--goodput` metrics must be `ttft`, `tpot`, or `e2el`
+5. `--goodput` per-request metrics must be `ttft`, `tpot`, or `e2el` (values in ms)
 6. `--num-prompts` < 100 → warn about P99 significance
 
 If validation fails, explain the issue to the user and suggest corrections. Do not proceed until all errors are resolved.
@@ -367,7 +388,7 @@ When running in a remote/container environment (determined in Phase 0):
 Finds the maximum concurrency/rate satisfying SLO constraints.
 
 ### Prerequisites
-User MUST provide at least one SLO constraint (TTFT P99, TPOT P99, E2E P99, or success rate). Do NOT define "optimal" without explicit constraints.
+User MUST provide at least one SLO constraint. Supported: any latency metric (`mean_ttft`, `p99_tpot`, `median_e2el`, etc.), `success_rate`, or `goodput_ratio`. Do NOT define "optimal" without explicit constraints. Ask the user what their SLO targets are.
 
 ### Search Modes
 
@@ -403,11 +424,11 @@ Confirm multiplier preference with user before starting. Use defaults if no pref
 4. **Validation**: Run at the optimal point with higher `num_prompts` to confirm SLO compliance. If validation fails, reduce by 10% and retry (max 3 retries).
 
 ### SLO Compliance Check (after each iteration)
+All specified SLO constraints must be satisfied:
 ```
-ttft_p99 <= slo_ttft_p99  (if specified)
-tpot_p99 <= slo_tpot_p99  (if specified)
-e2e_p99  <= slo_e2e_p99   (if specified)
-success_rate >= slo_success_rate  (default 95%)
+latency metrics (mean/median/pN) <= target  (e.g., p99_ttft <= 500ms)
+success_rate >= target  (e.g., >= 95%)
+goodput_ratio >= target  (e.g., >= 0.9, requires --goodput-config)
 ```
 
 ### Edge Cases
@@ -426,7 +447,7 @@ bench_results/optimize/opt_TIMESTAMP/
 └── optimization_report.json   # Final summary
 ```
 
-Execute via: `python3 <skill-path>/scripts/auto_optimize.py --base-url ... --slo-ttft-p99 500 --search-mode A`
+Execute via: `python3 <skill-path>/scripts/auto_optimize.py --base-url ... --slo "p99_ttft:500" --slo "success_rate:95" --search-mode A`
 
 > Read `references/optimization-strategy.md` when: need algorithm details, adjusting convergence thresholds, handling edge cases (service saturated at minimum load, unstable metrics, two-stage Mode E search).
 > Skip when: running `auto_optimize.py` with default parameters — the summary above is sufficient.

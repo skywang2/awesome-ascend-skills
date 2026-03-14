@@ -204,15 +204,27 @@ python3 <skill-path>/scripts/aggregate_results.py --result-dir "$RESULT_DIR" --f
 
 ## 10. Auto-Optimization (SLO-Constrained)
 
-Find maximum concurrency with TTFT P99 < 500ms and success rate > 95%.
+Find maximum concurrency with P99 TTFT < 500ms, mean TPOT < 50ms, and success rate > 95%.
 
 ```bash
 python3 <skill-path>/scripts/auto_optimize.py \
   --base-url http://IP:PORT --model MODEL --backend openai-chat --endpoint /v1/chat/completions \
   --dataset-name random --random-input-len 1024 --random-output-len 128 \
-  --slo-ttft-p99 500 --slo-success-rate 95 \
+  --slo "p99_ttft:500" --slo "mean_tpot:50" --slo "success_rate:95" \
   --search-mode A \
   --coarse-multiplier 3 --fine-multiplier 6 --validation-multiplier 10 \
+  --result-dir ./bench_results/optimize/opt_$(date +%Y%m%d_%H%M%S)
+```
+
+Auto-optimize with goodput ratio constraint (90% of requests must have TTFT < 500ms and TPOT < 50ms):
+
+```bash
+python3 <skill-path>/scripts/auto_optimize.py \
+  --base-url http://IP:PORT --model MODEL --backend openai-chat --endpoint /v1/chat/completions \
+  --dataset-name random --random-input-len 1024 --random-output-len 128 \
+  --slo "goodput_ratio:0.9" --slo "success_rate:95" \
+  --goodput-config "ttft:500" --goodput-config "tpot:50" \
+  --search-mode A \
   --result-dir ./bench_results/optimize/opt_$(date +%Y%m%d_%H%M%S)
 ```
 

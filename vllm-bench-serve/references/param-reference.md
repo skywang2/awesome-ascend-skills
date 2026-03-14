@@ -173,7 +173,7 @@ Only effective with OpenAI-compatible backends (`openai`, `openai-chat`, `vllm`)
 |-----------|------|---------|-------------|
 | `--percentile-metrics` | str | `"ttft,tpot,itl"` (gen) / `"e2el"` (pooling) | Metrics to report percentiles for. Valid: `ttft`, `tpot`, `itl`, `e2el` |
 | `--metric-percentiles` | str | `"99"` | Comma-separated percentile values (e.g., `"50,90,95,99"`) |
-| `--goodput` | KEY:VALUE | — | SLO targets. Format: `METRIC:VALUE_MS`. Metrics: `ttft`, `tpot`, `e2el` |
+| `--goodput` | KEY:VALUE+ | — | Per-request SLO thresholds for goodput. `nargs="+"` (space-separated). Metrics: `ttft`, `tpot`, `e2el` (ms). A request is "good" if ALL its metrics meet the thresholds. Result includes `request_goodput` (good req/s). Example: `--goodput "ttft:500" "tpot:50"` |
 
 ## Result Saving
 

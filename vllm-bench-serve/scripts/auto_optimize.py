@@ -9,10 +9,15 @@ Usage:
         --base-url http://ip:port --model /path/to/weights --served-model-name MODEL_NAME \
         --backend openai-chat \
         --dataset-name random --random-input-len 1024 --random-output-len 128 \
-        --slo-ttft-p99 500 --slo-success-rate 95 \
+        --slo "p99_ttft:500" --slo "mean_tpot:50" --slo "success_rate:95" \
         --search-mode A \
         --coarse-multiplier 3 --fine-multiplier 6 --validation-multiplier 10 \
         --result-dir ./bench_results/optimize/opt_20260314
+
+SLO key format:
+    Latency: {mean|median|p50|p90|p95|p99}_{ttft|tpot|itl|e2el}:VALUE_MS  (check <=)
+    success_rate:PERCENT   (check >=, 0-100)
+    goodput_ratio:RATIO    (check >=, 0.0-1.0, requires --goodput-config)
 """
 
 import argparse
@@ -77,49 +82,130 @@ def run_benchmark(base_args: str, search_param: str, search_value: int | float,
     return data
 
 
-def check_slo(data: dict, slo_targets: dict) -> tuple[bool, list[str]]:
-    """Check if benchmark results meet SLO targets."""
+def parse_slo_specs(slo_list: list[str]) -> list[dict]:
+    """Parse --slo KEY:VALUE pairs into structured SLO targets.
+
+    Supported keys:
+      Latency:  {mean|median|p50|p90|p95|p99}_{ttft|tpot|itl|e2el}  (ms, check <=)
+      success_rate          (%, check >=)
+      goodput_ratio         (0.0-1.0, check >=)
+
+    Returns list of dicts: {key, value, json_key, direction}
+    """
+    import re
+
+    LATENCY_METRICS = {"ttft", "tpot", "itl", "e2el"}
+    AGGREGATIONS = {"mean", "median"}
+    targets = []
+
+    for spec in slo_list:
+        if ":" not in spec:
+            raise ValueError(f"Invalid SLO format '{spec}', expected 'KEY:VALUE'")
+        key, val_str = spec.split(":", 1)
+        value = float(val_str)
+
+        if key == "success_rate":
+            targets.append({
+                "key": key, "value": value, "json_key": "_special_success_rate",
+                "direction": ">=", "unit": "%",
+            })
+        elif key == "goodput_ratio":
+            targets.append({
+                "key": key, "value": value, "json_key": "_special_goodput_ratio",
+                "direction": ">=", "unit": "",
+            })
+        else:
+            # Try {agg}_{metric} pattern: mean_ttft, median_tpot, p99_e2el, etc.
+            m = re.match(r"^(mean|median|p\d+)_(ttft|tpot|itl|e2el)$", key)
+            if not m:
+                raise ValueError(
+                    f"Unknown SLO key '{key}'. Expected: "
+                    f"{{mean|median|p50|p90|p95|p99}}_{{ttft|tpot|itl|e2el}}, "
+                    f"success_rate, or goodput_ratio"
+                )
+            agg, metric = m.group(1), m.group(2)
+            if agg in AGGREGATIONS:
+                json_key = f"{agg}_{metric}_ms"
+            else:
+                # p99 → p99_ttft_ms (percentile key in result JSON)
+                json_key = f"{agg}_{metric}_ms"
+            targets.append({
+                "key": key, "value": value, "json_key": json_key,
+                "direction": "<=", "unit": "ms",
+            })
+
+    return targets
+
+
+def check_slo(data: dict, slo_targets: list[dict]) -> tuple[bool, list[str]]:
+    """Check if benchmark results meet all SLO targets.
+
+    slo_targets: list from parse_slo_specs()
+    """
     if "error" in data:
         return False, [f"Benchmark failed: {data['error']}"]
 
     violations = []
 
-    # TTFT P99
-    if "ttft_p99" in slo_targets:
-        actual = _get_percentile(data, "ttft", 99)
-        if actual is not None and actual > slo_targets["ttft_p99"]:
-            violations.append(f"TTFT P99: {actual:.1f}ms > {slo_targets['ttft_p99']}ms")
+    for slo in slo_targets:
+        key = slo["key"]
+        target = slo["value"]
+        direction = slo["direction"]
 
-    # TPOT P99
-    if "tpot_p99" in slo_targets:
-        actual = _get_percentile(data, "tpot", 99)
-        if actual is not None and actual > slo_targets["tpot_p99"]:
-            violations.append(f"TPOT P99: {actual:.1f}ms > {slo_targets['tpot_p99']}ms")
+        if slo["json_key"] == "_special_success_rate":
+            completed = data.get("completed", 0)
+            failed = data.get("failed", 0)
+            total = completed + failed
+            actual = (completed / total * 100) if total > 0 else 0
+            if actual < target:
+                violations.append(f"success_rate: {actual:.1f}% < {target}%")
 
-    # E2E P99
-    if "e2e_p99" in slo_targets:
-        actual = _get_percentile(data, "e2el", 99)
-        if actual is not None and actual > slo_targets["e2e_p99"]:
-            violations.append(f"E2E P99: {actual:.1f}ms > {slo_targets['e2e_p99']}ms")
+        elif slo["json_key"] == "_special_goodput_ratio":
+            goodput = data.get("request_goodput")
+            throughput = data.get("request_throughput")
+            if goodput is not None and throughput and throughput > 0:
+                actual = goodput / throughput
+                if actual < target:
+                    violations.append(
+                        f"goodput_ratio: {actual:.3f} < {target} "
+                        f"(goodput={goodput:.2f}, throughput={throughput:.2f})"
+                    )
+            else:
+                violations.append(
+                    "goodput_ratio: cannot compute — request_goodput not in results "
+                    "(did you pass --goodput-config?)"
+                )
 
-    # Success rate
-    if "success_rate" in slo_targets:
-        completed = data.get("completed", 0)
-        failed = data.get("failed", 0)
-        total = completed + failed
-        actual_rate = (completed / total * 100) if total > 0 else 0
-        if actual_rate < slo_targets["success_rate"]:
-            violations.append(
-                f"Success rate: {actual_rate:.1f}% < {slo_targets['success_rate']}%"
-            )
+        else:
+            # Latency metric: look up json_key directly in result data
+            json_key = slo["json_key"]
+            actual = data.get(json_key)
+            if actual is None:
+                # For percentile keys like p99_ttft_ms, also try the percentiles list
+                actual = _get_metric_from_percentiles(data, json_key)
+            if actual is not None:
+                if direction == "<=" and actual > target:
+                    violations.append(f"{key}: {actual:.1f}ms > {target}ms")
+                elif direction == ">=" and actual < target:
+                    violations.append(f"{key}: {actual:.1f}ms < {target}ms")
+            # If actual is None, metric not available — skip silently
+            # (may happen for itl/tpot with non-streaming backends)
 
     return len(violations) == 0, violations
 
 
-def _get_percentile(data: dict, metric: str, percentile: int) -> float | None:
-    """Extract a specific percentile value from result data."""
-    key = f"percentiles_{metric}_ms"
-    plist = data.get(key)
+def _get_metric_from_percentiles(data: dict, json_key: str) -> float | None:
+    """Fallback: extract metric from percentiles list if not a direct key.
+
+    E.g., json_key='p99_ttft_ms' → look in data['percentiles_ttft_ms'] for p=99.
+    """
+    import re
+    m = re.match(r"^p(\d+)_(ttft|tpot|itl|e2el)_ms$", json_key)
+    if not m:
+        return None
+    percentile = float(m.group(1))
+    metric = m.group(2)
+    plist = data.get(f"percentiles_{metric}_ms")
     if plist and isinstance(plist, list):
         for p, v in plist:
             if abs(float(p) - percentile) < 0.1:
@@ -127,7 +213,7 @@ def _get_percentile(data: dict, metric: str, percentile: int) -> float | None:
     return None
 
 
-def build_base_args(args) -> str:
+def build_base_args(args, slo_targets: list[dict]) -> str:
     """Build the common benchmark arguments string."""
     parts = [
         f"--base-url {args.base_url}",
@@ -141,6 +227,11 @@ def build_base_args(args) -> str:
         f"--endpoint {endpoint}",
         f"--dataset-name {args.dataset_name}",
     ])
+    # Inject --goodput flags for per-request SLO when goodput_ratio is used
+    # vllm bench serve uses: --goodput "ttft:500" "tpot:50" (nargs="+", space-separated)
+    if args.goodput_config:
+        goodput_args = " ".join(f'"{gc}"' for gc in args.goodput_config)
+        parts.append(f"--goodput {goodput_args}")
     # Use dataset-specific parameter names
     input_len = args.random_input_len or args.input_len
     output_len = args.random_output_len or args.output_len
@@ -201,11 +292,16 @@ def main():
     parser.add_argument("--random-prefix-len", type=int, default=None)
     parser.add_argument("--num-warmups", type=int, default=5)
 
-    # SLO targets
-    parser.add_argument("--slo-ttft-p99", type=float, default=None, help="TTFT P99 target (ms)")
-    parser.add_argument("--slo-tpot-p99", type=float, default=None, help="TPOT P99 target (ms)")
-    parser.add_argument("--slo-e2e-p99", type=float, default=None, help="E2E P99 target (ms)")
-    parser.add_argument("--slo-success-rate", type=float, default=95.0, help="Min success rate %%")
+    # SLO targets — generic format: --slo "KEY:VALUE" (repeatable)
+    # Keys: {mean|median|p50|p90|p95|p99}_{ttft|tpot|itl|e2el}, success_rate, goodput_ratio
+    parser.add_argument("--slo", action="append", default=None, metavar="KEY:VALUE",
+                        help='SLO constraint, e.g. "p99_ttft:500", "mean_tpot:50", '
+                             '"success_rate:95", "goodput_ratio:0.9". Repeatable.')
+    # Per-request goodput config — passed to vllm bench serve as --goodput "KEY:VALUE"
+    # Required when using goodput_ratio SLO
+    parser.add_argument("--goodput-config", action="append", default=None, metavar="METRIC:MS",
+                        help='Per-request SLO for goodput, e.g. "ttft:500" "tpot:50". '
+                             'Passed to vllm bench serve --goodput. Required for goodput_ratio SLO.')
 
     # Search configuration
     parser.add_argument("--search-mode", default="A", choices=["A", "B", "C", "D", "E"],
@@ -225,17 +321,17 @@ def main():
     args = parser.parse_args()
 
     # Build SLO targets
-    slo_targets = {}
-    if args.slo_ttft_p99 is not None:
-        slo_targets["ttft_p99"] = args.slo_ttft_p99
-    if args.slo_tpot_p99 is not None:
-        slo_targets["tpot_p99"] = args.slo_tpot_p99
-    if args.slo_e2e_p99 is not None:
-        slo_targets["e2e_p99"] = args.slo_e2e_p99
-    slo_targets["success_rate"] = args.slo_success_rate
+    if not args.slo:
+        print("ERROR: At least one --slo required, e.g. --slo 'p99_ttft:500' --slo 'success_rate:95'")
+        sys.exit(1)
 
-    if len(slo_targets) <= 1:  # only success_rate default
-        print("ERROR: At least one SLO target required (--slo-ttft-p99, --slo-tpot-p99, --slo-e2e-p99)")
+    slo_targets = parse_slo_specs(args.slo)
+
+    # Validate: goodput_ratio requires --goodput-config
+    has_goodput_slo = any(s["key"] == "goodput_ratio" for s in slo_targets)
+    if has_goodput_slo and not args.goodput_config:
+        print("ERROR: --slo 'goodput_ratio:...' requires --goodput-config to define per-request SLOs")
+        print("  Example: --goodput-config 'ttft:500' --goodput-config 'tpot:50'")
         sys.exit(1)
 
     # Determine search dimension
@@ -270,14 +366,15 @@ def main():
         args.result_dir = f"./bench_results/optimize/opt_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(args.result_dir, exist_ok=True)
 
-    base_args = build_base_args(args)
+    base_args = build_base_args(args, slo_targets)
     exploration_history = []
 
+    slo_display = [f"{s['key']}{s['direction']}{s['value']}{s['unit']}" for s in slo_targets]
     print("=" * 60)
     print("Auto-Optimization")
     print(f"  Mode: {mode}")
     print(f"  Search: {search_param}")
-    print(f"  SLO targets: {json.dumps(slo_targets)}")
+    print(f"  SLO targets: {', '.join(slo_display)}")
     print(f"  Multipliers: coarse={args.coarse_multiplier}, fine={args.fine_multiplier}, "
           f"validation={args.validation_multiplier}")
     print(f"  Result dir: {args.result_dir}")
@@ -421,12 +518,13 @@ def main():
                  f"Could not fully validate. Best effort: {search_param}={optimal}")
 
 
-def _save_report(result_dir: str, optimal_value: int | None, slo_targets: dict,
+def _save_report(result_dir: str, optimal_value: int | None, slo_targets: list[dict],
                  history: list, recommendation: str, metrics_data: dict | None = None):
     """Save optimization report JSON."""
     report = {
         "optimal_value": optimal_value,
-        "slo_targets": slo_targets,
+        "slo_targets": [{"key": s["key"], "direction": s["direction"], "value": s["value"]}
+                        for s in slo_targets],
         "recommendation": recommendation,
         "exploration_history": history,
         "timestamp": datetime.now().isoformat(),
@@ -434,6 +532,7 @@ def _save_report(result_dir: str, optimal_value: int | None, slo_targets: dict,
     if metrics_data:
         report["metrics_at_optimal"] = {
             "request_throughput": metrics_data.get("request_throughput"),
+            "request_goodput": metrics_data.get("request_goodput"),
             "output_throughput": metrics_data.get("output_throughput"),
             "completed": metrics_data.get("completed"),
             "failed": metrics_data.get("failed"),

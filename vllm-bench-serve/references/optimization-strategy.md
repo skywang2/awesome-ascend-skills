@@ -8,7 +8,7 @@ Find the maximum throughput or concurrency that satisfies user-defined SLO const
 
 Given:
 - A running vLLM inference service
-- A set of SLO constraints (e.g., TTFT P99 < 500ms, success rate > 95%)
+- A set of SLO constraints (e.g., `p99_ttft <= 500ms`, `mean_tpot <= 50ms`, `success_rate >= 95%`, `goodput_ratio >= 0.9`)
 - A search dimension (concurrency or request rate)
 
 Find:
@@ -93,13 +93,12 @@ loop (max 15 iterations):
   num_prompts = max(search_value × coarse_multiplier, 50)
 
   Run benchmark at search_value
-  Parse results: extract TTFT P99, TPOT P99, E2E P99, success rate
+  Parse results: extract all requested metrics
 
-  Check SLO compliance:
-    ttft_p99 <= slo_ttft_p99  (if specified)
-    tpot_p99 <= slo_tpot_p99  (if specified)
-    e2e_p99  <= slo_e2e_p99   (if specified)
-    success_rate >= slo_success_rate  (default 95%)
+  Check SLO compliance (all specified constraints):
+    latency metrics <= target  (e.g., p99_ttft <= 500ms, mean_tpot <= 50ms)
+    success_rate >= target  (if specified)
+    goodput_ratio >= target  (if specified)
 
   if ALL SLOs met:
     last_good = search_value
@@ -162,37 +161,46 @@ else:
 
 ## SLO Compliance Check
 
-For each benchmark iteration, extract metrics and check:
+For each benchmark iteration, extract metrics and check ALL SLO constraints.
+
+### Supported SLO Dimensions
+
+| SLO Key Format | Result JSON Key | Direction | Example |
+|----------------|----------------|-----------|---------|
+| `mean_{ttft\|tpot\|itl\|e2el}` | `mean_ttft_ms` | `<=` | `mean_ttft:300` |
+| `median_{ttft\|tpot\|itl\|e2el}` | `median_tpot_ms` | `<=` | `median_tpot:40` |
+| `p{N}_{ttft\|tpot\|itl\|e2el}` | `p99_ttft_ms` | `<=` | `p99_ttft:500` |
+| `success_rate` | `completed/(completed+failed)×100` | `>=` | `success_rate:95` |
+| `goodput_ratio` | `request_goodput/request_throughput` | `>=` | `goodput_ratio:0.9` |
+
+- Latency values are in milliseconds
+- `success_rate` is in percent (0-100)
+- `goodput_ratio` is a fraction (0.0-1.0); requires `--goodput` per-request SLO config on the benchmark command
+- Available percentiles depend on `--metric-percentiles` (default: 50, 90, 95, 99)
+
+### Check Logic
 
 ```python
 def check_slo(results, slo_targets):
     """
-    results: parsed benchmark output
-    slo_targets: dict of {metric: threshold}
+    results: parsed benchmark output JSON
+    slo_targets: list of {key, value, direction, json_key}
     Returns: (passed: bool, violations: list)
     """
     violations = []
 
-    if 'ttft_p99' in slo_targets:
-        actual = results['percentiles_ttft_ms']['p99']
-        if actual > slo_targets['ttft_p99']:
-            violations.append(f"TTFT P99: {actual:.1f}ms > {slo_targets['ttft_p99']}ms")
+    for slo in slo_targets:
+        if slo.key == "success_rate":
+            actual = results['completed'] / (results['completed'] + results['failed']) * 100
+            if actual < slo.value: violations.append(...)
 
-    if 'tpot_p99' in slo_targets:
-        actual = results['percentiles_tpot_ms']['p99']
-        if actual > slo_targets['tpot_p99']:
-            violations.append(f"TPOT P99: {actual:.1f}ms > {slo_targets['tpot_p99']}ms")
+        elif slo.key == "goodput_ratio":
+            actual = results['request_goodput'] / results['request_throughput']
+            if actual < slo.value: violations.append(...)
 
-    if 'e2e_p99' in slo_targets:
-        actual = results['percentiles_e2el_ms']['p99']
-        if actual > slo_targets['e2e_p99']:
-            violations.append(f"E2E P99: {actual:.1f}ms > {slo_targets['e2e_p99']}ms")
-
-    if 'success_rate' in slo_targets:
-        total = results['completed'] + results['failed']
-        actual = results['completed'] / total * 100 if total > 0 else 0
-        if actual < slo_targets['success_rate']:
-            violations.append(f"Success rate: {actual:.1f}% < {slo_targets['success_rate']}%")
+        else:  # latency metric
+            actual = results[slo.json_key]  # e.g., results['p99_ttft_ms']
+            if actual > slo.value: violations.append(...)
 
     return len(violations) == 0, violations
 ```
@@ -232,40 +240,32 @@ def check_slo(results, slo_targets):
 
 ```json
 {
-  "search_mode": "A",
-  "search_dimension": "max_concurrency",
-  "optimal_value": 16,
-  "slo_targets": {
-    "ttft_p99": 500,
-    "tpot_p99": 50,
-    "success_rate": 95
-  },
+  "optimal_value": 24,
+  "slo_targets": [
+    {"key": "p99_ttft", "direction": "<=", "value": 500},
+    {"key": "mean_tpot", "direction": "<=", "value": 50},
+    {"key": "success_rate", "direction": ">=", "value": 95}
+  ],
   "metrics_at_optimal": {
     "request_throughput": 45.2,
+    "request_goodput": null,
     "output_throughput": 5780,
-    "ttft_p99": 423.5,
-    "tpot_p99": 42.1,
-    "e2e_p99": 2830.0,
-    "success_rate": 99.2
+    "completed": 240,
+    "failed": 0
   },
-  "slo_compliance": [
-    {"metric": "TTFT P99", "target": "<=500ms", "actual": "423.5ms", "pass": true},
-    {"metric": "TPOT P99", "target": "<=50ms", "actual": "42.1ms", "pass": true},
-    {"metric": "Success Rate", "target": ">=95%", "actual": "99.2%", "pass": true}
-  ],
   "exploration_history": [
     {"phase": "warmup", "value": 1, "num_prompts": 50, "slo_pass": true, "file": "warmup.json"},
-    {"phase": "probe", "value": 1, "num_prompts": 3, "slo_pass": true, "file": "probe_001_c1.json"},
-    {"phase": "probe", "value": 2, "num_prompts": 6, "slo_pass": true, "file": "probe_002_c2.json"},
-    {"phase": "probe", "value": 4, "num_prompts": 12, "slo_pass": true, "file": "probe_003_c4.json"},
-    {"phase": "probe", "value": 8, "num_prompts": 24, "slo_pass": true, "file": "probe_004_c8.json"},
-    {"phase": "probe", "value": 16, "num_prompts": 48, "slo_pass": true, "file": "probe_005_c16.json"},
-    {"phase": "probe", "value": 32, "num_prompts": 96, "slo_pass": false, "file": "probe_006_c32.json"},
-    {"phase": "search", "value": 24, "num_prompts": 144, "slo_pass": true, "file": "search_001_c24.json"},
-    {"phase": "search", "value": 28, "num_prompts": 168, "slo_pass": false, "file": "search_002_c28.json"},
-    {"phase": "search", "value": 26, "num_prompts": 156, "slo_pass": false, "file": "search_003_c26.json"},
+    {"phase": "probe", "value": 1, "num_prompts": 50, "slo_pass": true, "file": "probe_001_m1.json"},
+    {"phase": "probe", "value": 2, "num_prompts": 50, "slo_pass": true, "file": "probe_002_m2.json"},
+    {"phase": "probe", "value": 4, "num_prompts": 50, "slo_pass": true, "file": "probe_003_m4.json"},
+    {"phase": "probe", "value": 8, "num_prompts": 50, "slo_pass": true, "file": "probe_004_m8.json"},
+    {"phase": "probe", "value": 16, "num_prompts": 50, "slo_pass": true, "file": "probe_005_m16.json"},
+    {"phase": "probe", "value": 32, "num_prompts": 96, "slo_pass": false, "file": "probe_006_m32.json"},
+    {"phase": "search", "value": 24, "num_prompts": 144, "slo_pass": true, "file": "search_001_m24.json"},
+    {"phase": "search", "value": 28, "num_prompts": 168, "slo_pass": false, "file": "search_002_m28.json"},
     {"phase": "validation", "value": 24, "num_prompts": 240, "slo_pass": true, "file": "validation.json"}
   ],
-  "recommendation": "Optimal max_concurrency = 24. At this concurrency, the service achieves 45.2 req/s throughput while keeping TTFT P99 at 423.5ms (target: <=500ms) and TPOT P99 at 42.1ms (target: <=50ms)."
+  "recommendation": "Optimal max-concurrency = 24. Achieves 45.2 req/s with p99_ttft=423.5ms (<=500ms), mean_tpot=42.1ms (<=50ms), success_rate=100% (>=95%).",
+  "timestamp": "2026-03-14T15:30:00"
 }
 ```
