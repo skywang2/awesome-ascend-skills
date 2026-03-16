@@ -75,6 +75,12 @@
       "category": "development"
     },
     {
+      "name": "npu-docker-launcher",
+      "description": "在昇腾 NPU 服务器上一键启动 Docker 容器。收集用户需求并执行 docker run 命令，自动配置 NPU 设备挂载、网络、卷挂载和环境变量。",
+      "source": "./npu-docker-launcher",
+      "category": "operations"
+    },
+    {
       "name": "diffusers-ascend-skills",
       "description": "Diffusers 昇腾 NPU 技能集，包括环境配置、权重准备、Pipeline 推理等。当用户需要在昇腾 NPU 上运行 Diffusers 推理时使用。",
       "source": "./",
