@@ -89,13 +89,13 @@ def analyze_performance(input_folder):
 
     if avg_free > 20:
         conclusion = "空闲占比超过20% → 判定为【下发问题】"
-        sub_skill = "/profiling-hostbound-skill"
+        sub_skill = "/profiling-analysis-profiling-hostbound"
     elif avg_compute > 85:
         conclusion = "计算占比超过85% → 判定为【计算问题】"
-        sub_skill = "/profiling-computing-skill"
+        sub_skill = "/profiling-analysis-profiling-computing"
     elif avg_comm > 10:
         conclusion = "通信占比超过10% → 判定为【通信问题】"
-        sub_skill = "/profiling-communication-skill"
+        sub_skill = "/profiling-analysis-profiling-communication"
     else:
         conclusion = "无明显性能瓶颈，系统运行正常"
         sub_skill = "无"

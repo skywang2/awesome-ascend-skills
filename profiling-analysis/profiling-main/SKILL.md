@@ -1,5 +1,5 @@
 ---
-name: profiling-main
+name: profiling-analysis-profiling-main
 description: Main skill for profiling performance analysis, identifying bottlenecks in computing, communication, and hostbound operations.
 ---
 
@@ -35,14 +35,14 @@ python scripts/performance_analysis_main_process.py
 
 ## 瓶颈判定规则
 
-1. **下发问题（Hostbound）**：空闲耗时占比 > 10% → 触发 `/profiling-hostbound-skill`
-2. **计算问题（Computing）**：计算耗时占比 > 85% → 触发 `/profiling-computing-skill`
-3. **通信问题（Communication）**：通信耗时占比 > 10% → 触发 `/profiling-communication-skill`
+1. **下发问题（Hostbound）**：空闲耗时占比 > 10% → 触发 `/profiling-analysis-profiling-hostbound`
+2. **计算问题（Computing）**：计算耗时占比 > 85% → 触发 `/profiling-analysis-profiling-computing`
+3. **通信问题（Communication）**：通信耗时占比 > 10% → 触发 `/profiling-analysis-profiling-communication`
 
 ## 子Skill调用
 
-如果遇到性能瓶颈问题，请调用子Agent运行对应的 /profiling-xx-skill：
+如果遇到性能瓶颈问题，请调用子Agent运行对应的 /profiling-analysis-xxx-skill：
 
-- **下发瓶颈问题**：调用 `/profiling-hostbound-skill`
-- **计算瓶颈问题**：调用 `/profiling-computing-skill`
-- **通信瓶颈问题**：调用 `/profiling-communication-skill`
+- **下发瓶颈问题**：调用 `/profiling-analysis-profiling-hostbound`
+- **计算瓶颈问题**：调用 `/profiling-analysis-profiling-computing`
+- **通信瓶颈问题**：调用 `/profiling-analysis-profiling-communication`

@@ -1,5 +1,5 @@
 ---
-name: profiling-hostbound
+name: profiling-analysis-profiling-hostbound
 description: Skill for analyzing hostbound performance bottlenecks, focusing on free time and下发 issues in Ascend NPU systems.
 ---
 
@@ -23,7 +23,7 @@ description: Skill for analyzing hostbound performance bottlenecks, focusing on 
 
 ## 使用方式
 
-该Skill通常由主分析Skill `/profiling-main` 自动调用，也可以单独使用：
+该Skill通常由主分析Skill `/profiling-analysis-profiling-main` 自动调用，也可以单独使用：
 
 ```python
 # 运行下发瓶颈分析

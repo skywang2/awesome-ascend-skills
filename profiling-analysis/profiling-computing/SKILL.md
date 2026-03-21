@@ -1,5 +1,5 @@
 ---
-name: profiling-computing
+name: profiling-analysis-profiling-computing
 description: Skill for analyzing computing performance bottlenecks, focusing on operator efficiency and computation optimization in Ascend NPU systems.
 ---
 
@@ -23,7 +23,7 @@ description: Skill for analyzing computing performance bottlenecks, focusing on 
 
 ## 使用方式
 
-该Skill通常由主分析Skill `/profiling-main` 自动调用，也可以单独使用：
+该Skill通常由主分析Skill `/profiling-analysis-profiling-main` 自动调用，也可以单独使用：
 
 ```python
 # 运行计算瓶颈分析
