@@ -1,0 +1,8 @@
+# External Skills Sources Configuration
+# 修改此文件会自动触发同步 workflow
+
+sources:
+  - name: mindstudio                    # 唯一标识，用于 external/{name}/ 目录
+    url: https://github.com/kali20gakki/mindstudio-skills
+    branch: main                        # 可选，默认 main
+    enabled: true                       # 可选，默认 true
