@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Sync external skills from configured repositories."""
 
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -202,6 +203,36 @@ def inject_attribution(skill: Skill, commit_sha: str) -> str:
     # Reassemble
     new_frontmatter = yaml.dump(fm, sort_keys=False, allow_unicode=True)
     return f"---\n{new_frontmatter}---\n{body}"
+
+
+def copy_skill(skill: Skill, commit_sha: str) -> bool:
+    """Copy skill to external/ directory, inject attribution, and validate.
+
+    Args:
+        skill: The Skill object to copy.
+        commit_sha: The Git commit SHA for attribution.
+
+    Returns:
+        True on success, False if validation fails.
+    """
+    target = Path("external") / skill.source.name / skill.name
+
+    if target.exists():
+        shutil.rmtree(target)
+
+    shutil.copytree(skill.path, target, ignore=shutil.ignore_patterns(".git"))
+
+    copied_skill = Skill(
+        name=skill.name, path=target, source=skill.source, has_skill_md=True
+    )
+    attributed_content = inject_attribution(copied_skill, commit_sha)
+    (target / "SKILL.md").write_text(attributed_content, encoding="utf-8")
+
+    result = subprocess.run(
+        ["python3", "scripts/validate_skills.py"], capture_output=True, text=True
+    )
+
+    return result.returncode == 0
 
 
 def main():
