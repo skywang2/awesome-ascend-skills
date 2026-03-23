@@ -8,7 +8,7 @@ import tempfile
 import yaml
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 script_dir = Path(__file__).parent
 project_root = script_dir.parent
@@ -127,14 +127,36 @@ def should_sync_on_pr() -> bool:
     return config_file in changed_files
 
 
-def clone_external_repo(source: ExternalSource) -> Path:
+def get_commit_sha(repo_path: Path) -> str:
+    """Get the most recent commit SHA from a git repository.
+
+    Args:
+        repo_path: Path to the git repository.
+
+    Returns:
+        The commit SHA string (40 characters).
+
+    Raises:
+        subprocess.CalledProcessError: If git log fails.
+    """
+    result = subprocess.run(
+        ["git", "log", "-1", "--format=%H"],
+        cwd=repo_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def clone_external_repo(source: ExternalSource) -> Tuple[Path, str]:
     """Clone external repo to temp directory with --depth 1.
 
     Args:
         source: ExternalSource configuration with url, branch, etc.
 
     Returns:
-        Path to the cloned temporary directory.
+        Tuple of (Path to the cloned temporary directory, commit SHA).
 
     Raises:
         subprocess.CalledProcessError: If git clone fails.
@@ -154,7 +176,9 @@ def clone_external_repo(source: ExternalSource) -> Path:
         check=True,
         capture_output=True,
     )
-    return Path(temp_dir)
+    repo_path = Path(temp_dir)
+    commit_sha = get_commit_sha(repo_path)
+    return repo_path, commit_sha
 
 
 def parse_skill_md(skill_path: Path) -> Dict:
@@ -400,7 +424,8 @@ def sync_all_sources(config_path: str = ".github/external-sources.yml") -> Dict:
        - Check for conflicts with local or synced skills
        - Copy skills that don't conflict
        - Clean up the cloned repository
-    3. Return summary statistics
+    3. Update marketplace.json and README.md with synced skills
+    4. Return summary statistics
 
     Args:
         config_path: Path to YAML configuration file (default: .github/external-sources.yml)
@@ -413,7 +438,7 @@ def sync_all_sources(config_path: str = ".github/external-sources.yml") -> Dict:
     """
     sources = load_config(config_path)
 
-    all_synced = []
+    all_synced_skills = []  # List of (Skill, commit_sha) tuples
     all_skipped = []
     all_errors = []
 
@@ -426,8 +451,8 @@ def sync_all_sources(config_path: str = ".github/external-sources.yml") -> Dict:
 
         try:
             print(f"  Cloning {source.url} (branch: {source.branch})...")
-            repo_path = clone_external_repo(source)
-            print(f"  ✓ Cloned to {repo_path}")
+            repo_path, commit_sha = clone_external_repo(source)
+            print(f"  ✓ Cloned to {repo_path} (commit: {commit_sha[:7]})")
 
             skills = find_skills(repo_path, source)
             print(f"  Found {len(skills)} skills")
@@ -450,10 +475,10 @@ def sync_all_sources(config_path: str = ".github/external-sources.yml") -> Dict:
 
                 try:
                     print(f"  Syncing {skill.name}...")
-                    success = copy_skill(skill, "latest")
+                    success = copy_skill(skill, commit_sha)
                     if success:
                         print(f"  ✓ Synced {skill.name}")
-                        all_synced.append(skill.name)
+                        all_synced_skills.append((skill, commit_sha))
                     else:
                         print(f"  ❌ Validation failed for {skill.name}")
                         all_errors.append((skill.name, "Validation failed"))
@@ -468,9 +493,16 @@ def sync_all_sources(config_path: str = ".github/external-sources.yml") -> Dict:
             print(f"  ❌ Error processing source {source.name}: {e}")
             all_errors.append((source.name, str(e)))
 
+    # Update marketplace.json and README.md with synced skills
+    if all_synced_skills:
+        print("\nUpdating marketplace.json...")
+        update_marketplace(all_synced_skills)
+        print("\nUpdating README.md...")
+        update_readme(all_synced_skills)
+
     # Return summary statistics
     results = {
-        "synced": len(all_synced),
+        "synced": len(all_synced_skills),
         "skipped": len(all_skipped),
         "errors": len(all_errors),
     }
@@ -481,7 +513,7 @@ def sync_all_sources(config_path: str = ".github/external-sources.yml") -> Dict:
     print(f"  Synced: {results['synced']}")
     print(f"  Skipped: {results['skipped']}")
     print(f"  Errors: {results['errors']}")
-    print(f"  Total: {len(all_synced) + len(all_skipped) + len(all_errors)}")
+    print(f"  Total: {len(all_synced_skills) + len(all_skipped) + len(all_errors)}")
     print("=" * 60)
 
     return results
