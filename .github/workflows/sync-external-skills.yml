@@ -59,9 +59,22 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Create sync branch from current main
+          SYNC_BRANCH="feat/sync-external-auto"
+          git checkout -b $SYNC_BRANCH
+          
           git add -A
-          git commit -m "sync(external): update external skills"
-          git push origin HEAD:feat/sync-external-auto
-          gh pr create --title "sync(external): update external skills" --body "Auto-synced from external sources" --label "external-sync" --base main || echo "PR may already exist"
+          git commit -m "sync(external): update external skills from external sources"
+          
+          # Force push to replace any existing sync branch
+          git push --force origin $SYNC_BRANCH
+          
+          # Create or update PR
+          gh pr create --title "sync(external): update external skills" \
+            --body "Auto-synced from external sources. See validation report in workflow logs." \
+            --base main || \
+          gh pr edit --title "sync(external): update external skills" \
+            --body "Auto-synced from external sources. See validation report in workflow logs."
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
