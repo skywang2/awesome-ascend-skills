@@ -1,5 +1,5 @@
 ---
-name: "gitcode-merge-flow"
+name: gitcode-merge-flow
 description: "Automates GitCode open-source repo merge workflow: commit → push → issue → PR → pipeline → review → /lgtm & /approve → merge. Invoke when user wants to submit code to a GitCode open-source repository."
 ---
 
